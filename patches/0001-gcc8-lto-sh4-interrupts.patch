@@ -1,0 +1,31 @@
+From: Pobega <pobega@users.noreply.github.com>
+Subject: [PATCH] Fix GCC 8.3 RTL LTO internal compiler error in sh4_interrupts
+
+Work around GCC 8.3.0 internal compiler error (gen_reg_rtx at emit-rtl.c:1187)
+during link-time optimization (LTO) on aarch64 toolchains (e.g. tg5040).
+GCC 8.3 fails to compute the addresses of INTC_IPRA.reg_data, INTC_IPRB.reg_data,
+and INTC_IPRC.reg_data in the static const InterruptSourceList initializer.
+Indexing the underlying INTC MMIO array directly via ((const u16*)&INTC[1..3])
+allows GCC 8.3 to emit the constant table without crashing.
+---
+ core/hw/sh4/sh4_interrupts.cpp | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/core/hw/sh4/sh4_interrupts.cpp b/core/hw/sh4/sh4_interrupts.cpp
+index 49a3be455..56886e414 100644
+--- a/core/hw/sh4/sh4_interrupts.cpp
++++ b/core/hw/sh4/sh4_interrupts.cpp
+@@ -25,9 +25,9 @@ const u16 IRLPriority = 0x0246;
+ #define IRLP11 &IRLPriority,4
+ #define IRLP13 &IRLPriority,8
+ 
+-#define GIPA(p) &INTC_IPRA.reg_data,4*p
+-#define GIPB(p) &INTC_IPRB.reg_data,4*p
+-#define GIPC(p) &INTC_IPRC.reg_data,4*p
++#define GIPA(p) ((const u16*)&INTC[1]),4*p
++#define GIPB(p) ((const u16*)&INTC[2]),4*p
++#define GIPC(p) ((const u16*)&INTC[3]),4*p
+ 
+ struct InterptSourceList_Entry
+ {
+-- 

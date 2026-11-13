@@ -1,0 +1,14 @@
+{
+  "name": "DC",
+  "type": "EMU",
+  "description": "Sega Dreamcast (Flycastrophe) libretro pak for NextUI",
+  "author": "Pobega",
+  "repo_url": "https://github.com/Pobega/nextui-dreamcast-pak",
+  "release_filename": "DC.pak.zip",
+  "platforms": [
+    "tg5040",
+    "h700"
+  ],
+  "launch": "launch.sh",
+  "version": "0.1.0"
+}

@@ -1,38 +1,44 @@
 From: Pobega <pobega@users.noreply.github.com>
-Subject: [PATCH] Add D-Pad to Left Analog Stick core option with attack ramp
+Subject: [PATCH] Add D-Pad to Left Analog Stick core option with curved ramp
 
 Add reicast_dpad_to_analog (disabled, analog, both),
-reicast_dpad_to_analog_ramp (instant, fast, medium, slow; default medium),
-and reicast_dpad_to_analog_sensitivity (40%-100%; default 100%) to route
-D-Pad inputs smoothly to the Dreamcast Left Analog Stick on stickless handhelds.
+reicast_dpad_to_analog_ramp (instant, fast, medium, slow; default medium 220 ms),
+and reicast_dpad_to_analog_sensitivity (40%-100%; default 100%) using a quadratic
+ease-in curve starting at 20% to route D-Pad inputs smoothly to the Dreamcast
+Left Analog Stick on stickless handhelds.
 ---
- shell/libretro/libretro.cpp            | 155 ++++++++++++++++++++++++++++++---
+ shell/libretro/libretro.cpp            | 170 +++++++++++++++++++++++++++++++--
  shell/libretro/libretro_core_options.h |  48 ++++++++++
- 2 files changed, 193 insertions(+), 10 deletions(-)
+ 2 files changed, 208 insertions(+), 10 deletions(-)
 
 diff --git a/shell/libretro/libretro.cpp b/shell/libretro/libretro.cpp
-index ff5e4fa6e..bef799432 100644
+index ff5e4fa6e..c415a0f3d 100644
 --- a/shell/libretro/libretro.cpp
 +++ b/shell/libretro/libretro.cpp
-@@ -125,6 +125,17 @@ static int astick_deadzone = 0;
+@@ -125,6 +125,22 @@ static int astick_deadzone = 0;
  static int trigger_deadzone = 0;
  static bool digital_triggers = false;
  static bool allow_service_buttons = false;
 +enum DpadToAnalogMode { DPAD_ANALOG_DISABLED = 0, DPAD_ANALOG_ONLY, DPAD_ANALOG_BOTH };
 +static DpadToAnalogMode dpad_to_analog_mode = DPAD_ANALOG_DISABLED;
-+static int dpad_analog_ramp_ms = 160;
++static int dpad_analog_ramp_ms = 220;
 +static float dpad_analog_max_frac = 1.0f;
 +static bool dpadAnalogShown = true;
++struct DpadAxisState
++{
++	int8_t dir;
++	float progress;
++};
 +struct DpadAnalogState
 +{
-+	float axis[2];
++	DpadAxisState axis[2];
 +	u64 last_ms;
 +};
 +static DpadAnalogState dpad_analog_state[4] = {};
  static bool haveCardReader;
  
  static bool libretro_supports_bitmasks = false;
-@@ -727,6 +738,23 @@ static bool set_variable_visibility(void)
+@@ -727,6 +743,23 @@ static bool set_variable_visibility(void)
  		updated = true;
  	}
  
@@ -56,7 +62,7 @@ index ff5e4fa6e..bef799432 100644
  	return updated;
  }
  
-@@ -1028,6 +1056,40 @@ static void update_variables(bool first_startup)
+@@ -1028,6 +1061,40 @@ static void update_variables(bool first_startup)
  	else
  		allow_service_buttons = false;
  
@@ -74,15 +80,15 @@ index ff5e4fa6e..bef799432 100644
 +		dpad_to_analog_mode = DPAD_ANALOG_DISABLED;
 +
 +	var.key = CORE_OPTION_NAME "_dpad_to_analog_ramp";
-+	dpad_analog_ramp_ms = 160;
++	dpad_analog_ramp_ms = 220;
 +	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
 +	{
 +		if (!strcmp("instant", var.value))
 +			dpad_analog_ramp_ms = 0;
 +		else if (!strcmp("fast", var.value))
-+			dpad_analog_ramp_ms = 100;
++			dpad_analog_ramp_ms = 140;
 +		else if (!strcmp("slow", var.value))
-+			dpad_analog_ramp_ms = 250;
++			dpad_analog_ramp_ms = 320;
 +	}
 +
 +	var.key = CORE_OPTION_NAME "_dpad_to_analog_sensitivity";
@@ -97,7 +103,7 @@ index ff5e4fa6e..bef799432 100644
  	var.key = CORE_OPTION_NAME "_lightgun_crosshair_size_scaling";
  	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
  		lightgun_crosshair_size = (float)LIGHTGUN_CROSSHAIR_SIZE * std::stof(var.value) / 100.f;
-@@ -2748,6 +2810,74 @@ static void get_analog_stick( retro_input_state_t input_state_cb,
+@@ -2748,6 +2815,84 @@ static void get_analog_stick( retro_input_state_t input_state_cb,
     *p_analog_y = analog_y;
  }
  
@@ -114,26 +120,36 @@ index ff5e4fa6e..bef799432 100644
 +   return (int16_t)(ret & ~dpad_mask);
 +}
 +
-+static float step_dpad_axis(float cur, int dir, u32 dt_ms)
++static float step_dpad_axis(DpadAxisState &axis, int dir, u32 dt_ms)
 +{
-+   constexpr float kStartFrac = 0.25f;
++   constexpr float kStartFrac = 0.20f;
 +   if (dir == 0)
++   {
++      axis.dir = 0;
++      axis.progress = 0.0f;
 +      return 0.0f;
++   }
 +   if (dpad_analog_ramp_ms <= 0)
++   {
++      axis.dir = (int8_t)dir;
++      axis.progress = 1.0f;
 +      return (float)dir * dpad_analog_max_frac;
++   }
 +
-+   float sign = (float)dir;
++   if (axis.dir != dir)
++   {
++      axis.dir = (int8_t)dir;
++      axis.progress = 0.0f;
++   }
++   else
++   {
++      axis.progress = std::min(1.0f, axis.progress + (float)dt_ms / (float)dpad_analog_ramp_ms);
++   }
++
 +   float start = std::min(kStartFrac, dpad_analog_max_frac);
-+   if (cur * sign <= 0.0f)
-+      return sign * start;
-+
-+   float step = (1.0f - kStartFrac) * ((float)dt_ms / (float)dpad_analog_ramp_ms);
-+   float next = cur + sign * step;
-+   if (next > dpad_analog_max_frac)
-+      next = dpad_analog_max_frac;
-+   else if (next < -dpad_analog_max_frac)
-+      next = -dpad_analog_max_frac;
-+   return next;
++   float curved = axis.progress * axis.progress;
++   float mag = start + (dpad_analog_max_frac - start) * curved;
++   return (float)dir * mag;
 +}
 +
 +static void apply_dpad_to_analog(int16_t ret, u32 port, s16 *axis_x, s16 *axis_y)
@@ -145,8 +161,8 @@ index ff5e4fa6e..bef799432 100644
 +   DpadAnalogState &st = dpad_analog_state[port];
 +   if (dpad_to_analog_mode == DPAD_ANALOG_DISABLED)
 +   {
-+      st.axis[0] = 0.0f;
-+      st.axis[1] = 0.0f;
++      st.axis[0] = {0, 0.0f};
++      st.axis[1] = {0, 0.0f};
 +      st.last_ms = 0;
 +      return;
 +   }
@@ -160,19 +176,19 @@ index ff5e4fa6e..bef799432 100644
 +   int dx = ((ret >> RETRO_DEVICE_ID_JOYPAD_RIGHT) & 1) - ((ret >> RETRO_DEVICE_ID_JOYPAD_LEFT) & 1);
 +   int dy = ((ret >> RETRO_DEVICE_ID_JOYPAD_DOWN)  & 1) - ((ret >> RETRO_DEVICE_ID_JOYPAD_UP)   & 1);
 +
-+   st.axis[0] = step_dpad_axis(st.axis[0], dx, dt_ms);
-+   st.axis[1] = step_dpad_axis(st.axis[1], dy, dt_ms);
++   float vx = step_dpad_axis(st.axis[0], dx, dt_ms);
++   float vy = step_dpad_axis(st.axis[1], dy, dt_ms);
 +
 +   if (dx)
-+      *axis_x = (s16)round(st.axis[0] * kAnalogAxisMax);
++      *axis_x = (s16)round(vx * kAnalogAxisMax);
 +   if (dy)
-+      *axis_y = (s16)round(st.axis[1] * kAnalogAxisMax);
++      *axis_y = (s16)round(vy * kAnalogAxisMax);
 +}
 +
  static uint16_t apply_trigger_deadzone( uint16_t input )
  {
     if ( trigger_deadzone > 0 )
-@@ -3009,30 +3139,32 @@ static void UpdateInputStateNaomi(u32 port)
+@@ -3009,30 +3154,32 @@ static void UpdateInputStateNaomi(u32 port)
  						ret |= (1 << id);
  			}
  
@@ -210,7 +226,7 @@ index ff5e4fa6e..bef799432 100644
  					{
  						if ((coin_limit && coin_inserted < coin_limit) || !coin_limit)
  						{
-@@ -3041,15 +3173,15 @@ static void UpdateInputStateNaomi(u32 port)
+@@ -3041,15 +3188,15 @@ static void UpdateInputStateNaomi(u32 port)
  						}
  
  						if (!select_pressed[port])
@@ -230,7 +246,7 @@ index ff5e4fa6e..bef799432 100644
  					break;
  				}
  			}
-@@ -3057,6 +3189,7 @@ static void UpdateInputStateNaomi(u32 port)
+@@ -3057,6 +3204,7 @@ static void UpdateInputStateNaomi(u32 port)
  			// -- analog stick
  
  			get_analog_stick(input_cb, port, RETRO_DEVICE_INDEX_ANALOG_LEFT, &joyx[port], &joyy[port] );
@@ -238,7 +254,7 @@ index ff5e4fa6e..bef799432 100644
  			get_analog_stick(input_cb, port, RETRO_DEVICE_INDEX_ANALOG_RIGHT, &joyrx[port], &joyry[port]);
  			lt[port] = get_analog_trigger(ret, input_cb, port, RETRO_DEVICE_ID_JOYPAD_L2) * 2;
  			rt[port] = get_analog_trigger(ret, input_cb, port, RETRO_DEVICE_ID_JOYPAD_R2) * 2;
-@@ -3196,13 +3329,15 @@ static void UpdateInputState(u32 port)
+@@ -3196,13 +3344,15 @@ static void UpdateInputState(u32 port)
  	case MDT_SegaControllerXL:
  		{
  			int16_t ret = getBitmask(port, RETRO_DEVICE_JOYPAD);
@@ -256,7 +272,7 @@ index ff5e4fa6e..bef799432 100644
  
  			// -- triggers
 diff --git a/shell/libretro/libretro_core_options.h b/shell/libretro/libretro_core_options.h
-index c1b8b4871..055bde489 100644
+index c1b8b4871..9011a6fc2 100644
 --- a/shell/libretro/libretro_core_options.h
 +++ b/shell/libretro/libretro_core_options.h
 @@ -999,6 +999,54 @@ struct retro_core_option_v2_definition option_defs_us[] = {
@@ -282,14 +298,14 @@ index c1b8b4871..055bde489 100644
 +      CORE_OPTION_NAME "_dpad_to_analog_ramp",
 +      "D-Pad to Analog Ramp Speed",
 +      NULL,
-+      "Gradually ramps stick deflection when holding D-Pad (starts at 25% to clear deadzone, snaps to center on release).",
++      "Smoothly eases stick deflection along a curve when holding D-Pad (starts at 20% to clear deadzone, snaps to center on release).",
 +      NULL,
 +      "input",
 +      {
 +         { "instant", "Instant" },
-+         { "fast",    "Fast (100 ms)" },
-+         { "medium",  "Medium (160 ms)" },
-+         { "slow",    "Slow (250 ms)" },
++         { "fast",    "Fast (140 ms)" },
++         { "medium",  "Medium (220 ms)" },
++         { "slow",    "Slow (320 ms)" },
 +         { NULL, NULL },
 +      },
 +      "medium",

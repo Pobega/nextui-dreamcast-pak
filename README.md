@@ -96,7 +96,7 @@ Default options are tuned for maximum speed while preserving rendering stability
 - `reicast_auto_skip_frame = some`: Drops rendering frames only when audio buffer runs low.
 - `reicast_widescreen_hack`: Automatically enabled on 16:9 displays (`default-smartpro.cfg`) and disabled on 4:3 screens (`default.cfg`, `default-brick.cfg`).
 - `reicast_fcr_* = enabled`: Enables Flycastrophe's off-thread polygon parser, fast `fipr` math, SH4 wait-loop skip, and threaded AICA audio.
-- `reicast_dpad_to_analog`: Maps D-Pad inputs to the Dreamcast Left Analog Stick (`disabled`, `analog` for Left Stick only, or `both` for Left Stick + D-Pad), with configurable attack ramp speed (`reicast_dpad_to_analog_ramp`, defaults to `medium` 160 ms) and max deflection (`reicast_dpad_to_analog_sensitivity`). Enabled (`both`) by default on stickless handhelds (`default.cfg`, `default-brick.cfg`, `default-brickpro.cfg`) and `disabled` on Smart Pro (`default-smartpro.cfg`, `default-smartpros.cfg`).
+- `reicast_dpad_to_analog`: Maps D-Pad inputs to the Dreamcast Left Analog Stick (`disabled`, `analog` for Left Stick only, or `both` for Left Stick + D-Pad), with a quadratic ease-in ramp (`reicast_dpad_to_analog_ramp`, defaults to `medium` 220 ms) and max deflection (`reicast_dpad_to_analog_sensitivity`). Enabled (`both`) by default on stickless handhelds (`default.cfg`, `default-brick.cfg`, `default-brickpro.cfg`) and `disabled` on Smart Pro (`default-smartpro.cfg`, `default-smartpros.cfg`).
 
 ---
 

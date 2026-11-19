@@ -81,13 +81,14 @@ Supported formats:
 | **B** | A |
 | **X** | Y |
 | **Y** | X |
-| **L1 / L2** | L Trigger |
-| **R1 / R2** | R Trigger |
+| **L2** | L Trigger |
+| **R2** | R Trigger |
 | **Start** | Start |
 | **Menu** | MinArch Quick Menu |
 
 ### Core Options & Tuning
 Default options are tuned for maximum speed while preserving rendering stability:
+- `reicast_device_port1_slot2 = None`: Disables the Purupuru Vibration Pack by default (re-enable in **Options -> Emulator -> Expansions** if desired).
 - `reicast_threaded_rendering = enabled`: Runs emulation and renderer across multiple CPU cores.
 - `reicast_delay_frame_swapping = disabled`: Keeps 30 FPS games paced at 100% real-time speed alongside threaded rendering.
 - `reicast_gdrom_fast_loading = enabled`: Speeds up GD-ROM disc reads.

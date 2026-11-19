@@ -30,7 +30,7 @@ all: release
 
 src: $(SRC_DIR)/.patched
 
-$(SRC_DIR)/.patched:
+$(SRC_DIR)/.patched: $(wildcard $(CURDIR)/patches/*.patch)
 	@mkdir -p $(BUILD_DIR)
 	@if [ ! -d "$(SRC_DIR)/.git" ]; then \
 		echo "Cloning $(FLYCASTROPHE_REPO)..."; \

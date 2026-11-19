@@ -81,8 +81,8 @@ Supported formats:
 | **B** | A |
 | **X** | Y |
 | **Y** | X |
-| **L2** | L Trigger |
-| **R2** | R Trigger |
+| **L1** | L Trigger |
+| **R1** | R Trigger |
 | **Start** | Start |
 | **Menu** | MinArch Quick Menu |
 

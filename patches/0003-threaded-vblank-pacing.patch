@@ -1,0 +1,146 @@
+diff --git a/core/hw/pvr/Renderer_if.cpp b/core/hw/pvr/Renderer_if.cpp
+index f2b9c567b..ba505fa1a 100644
+--- a/core/hw/pvr/Renderer_if.cpp
++++ b/core/hw/pvr/Renderer_if.cpp
+@@ -13,6 +13,7 @@
+ #include "deadcast/profiler.h"
+ #include "network/ggpo.h"
+ 
++#include <atomic>
+ #include <mutex>
+ #include <deque>
+ #include <condition_variable>
+@@ -122,6 +123,9 @@ static bool pend_rend;
+ static bool rendererEnabled = true;
+ 
+ static bool presented;
++static bool vblankReached;
++static cResetEvent vblankAck;
++static std::atomic<bool> vblankCancelled { false };
+ static u32 fbAddrHistory[2] { 1, 1 };
+ 
+ class PvrMessageQueue
+@@ -129,7 +133,7 @@ class PvrMessageQueue
+ 	using lock_guard = std::lock_guard<std::mutex>;
+ 
+ public:
+-	enum MessageType { NoMessage = -1, Render, RenderFramebuffer, Present, Stop };
++	enum MessageType { NoMessage = -1, Render, RenderFramebuffer, Present, VBlank, Stop };
+ 	struct Message
+ 	{
+ 		Message() = default;
+@@ -208,9 +212,13 @@ public:
+ 
+ 	bool waitAndExecute(int timeoutMs = -1)
+ 	{
+-		return execute(dequeue(timeoutMs));
++		Message msg = dequeue(timeoutMs);
++		lastMsgType = msg.type;
++		return execute(msg);
+ 	}
+ 
++	MessageType lastType() const { return lastMsgType; }
++
+ 	void reset() {
+ 		const lock_guard lock(mutex);
+ 		queue.clear();
+@@ -269,6 +277,10 @@ private:
+ 		case Present:
+ 			present();
+ 			return true;
++		case VBlank:
++			vblankReached = true;
++			vblankAck.Set();
++			return true;
+ 		case Stop:
+ 		case NoMessage:
+ 		default:
+@@ -276,6 +288,8 @@ private:
+ 		}
+ 	}
+ 
++	MessageType lastMsgType = NoMessage;
++
+ 	void render()
+ 	{
+ 		FC_PROFILE_SCOPE;
+@@ -396,6 +410,20 @@ bool rend_single_frame(const bool& enabled)
+ 
+ 	const int timeout = SPG_CONTROL.isPAL() ? 23 : 20;
+ 	presented = false;
++	vblankReached = false;
++	if (config::ThreadedRendering && config::VblankPacing)
++	{
++		for (int timeouts = 0; enabled && !vblankReached && timeouts < 5; )
++		{
++			if (!pvrQueue.waitAndExecute(timeout))
++			{
++				if (pvrQueue.lastType() == PvrMessageQueue::Stop)
++					break;
++				timeouts++;
++			}
++		}
++		return presented;
++	}
+ 	while (enabled && !presented)
+ 		if (!pvrQueue.waitAndExecute(timeout))
+ 			return false;
+@@ -567,6 +595,7 @@ static void rend_create_renderer()
+ 
+ bool rend_init_renderer()
+ {
++	vblankCancelled = false;
+ 	rendererEnabled = true;
+ 	if (renderer == nullptr)
+ 		rend_create_renderer();
+@@ -609,6 +638,7 @@ void rend_reset()
+ 	FrameCount = 1;
+ 	fb_w_cur = 1;
+ 	pvrQueue.reset();
++	vblankCancelled = false;
+ 	rendererEnabled = true;
+ 	fbAddrHistory[0] = 1;
+ 	fbAddrHistory[1] = 1;
+@@ -741,6 +771,16 @@ void rend_vblank()
+ 	check_framebuffer_write();
+ 	emu.vblank();
+ 	swapIntervalDetector.vblank();
++	if (config::ThreadedRendering && config::VblankPacing && rend_is_enabled() && !vblankCancelled)
++	{
++		vblankAck.Reset();
++		if (!vblankCancelled)
++		{
++			pvrQueue.enqueue(PvrMessageQueue::VBlank);
++			if (!vblankCancelled)
++				vblankAck.Wait();
++		}
++	}
+ }
+ 
+ void check_framebuffer_write()
+@@ -754,6 +794,8 @@ void rend_cancel_emu_wait()
+ {
+ 	if (config::ThreadedRendering)
+ 	{
++		vblankCancelled = true;
++		vblankAck.Set();
+ 		FinishRender(NULL);
+ 		renderEnd.Set();
+ 		rend_allow_rollback();
+diff --git a/shell/libretro/libretro.cpp b/shell/libretro/libretro.cpp
+index ff5e4fa6e..87c7abb48 100644
+--- a/shell/libretro/libretro.cpp
++++ b/shell/libretro/libretro.cpp
+@@ -1310,8 +1310,11 @@ void retro_run()
+ 		if (config::ThreadedRendering)
+ 		{
+ 			// Render
+-			for (int i = 0; i < 5 && is_dupe; i++)
++			if (config::VblankPacing)
+ 				is_dupe = !emu.render();
++			else
++				for (int i = 0; i < 5 && is_dupe; i++)
++					is_dupe = !emu.render();
+ 		}
+ 		else
+ 		{
